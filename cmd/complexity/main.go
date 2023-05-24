@@ -6,40 +6,35 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/mkeeler/go-complexity/internal/cyclomatic"
+	cyclomatic "github.com/mkeeler/go-complexity/internal/cyclomatic-complexity"
+	goroutines "github.com/mkeeler/go-complexity/internal/go-routines"
 	"github.com/mkeeler/go-complexity/internal/inspector"
+	"github.com/mkeeler/go-complexity/internal/loc"
 )
 
-func outputPretty(c *cyclomatic.CyclomaticComplexity) {
-	for pkg, pkgC := range c.Packages {
-		fmt.Printf("Package: %s\n", pkg)
-		for fnName, fnC := range pkgC.Functions {
-			fmt.Printf("\tFunction: %s, Complexity: %d\n", fnName, fnC.Score)
+func contains[T comparable](s []T, check T) bool {
+	for _, v := range s {
+		if v == check {
+			return true
 		}
 	}
+	return false
 }
 
-type jsonFormatEntry struct {
-	Package  string
-	Function string
-	Score    int
-}
-
-func outputJSON(c *cyclomatic.CyclomaticComplexity) {
-	var entries []*jsonFormatEntry
-	for pkg, pkgC := range c.Packages {
-		for fnName, fnC := range pkgC.Functions {
-			entries = append(entries, &jsonFormatEntry{Package: pkg, Function: fnName, Score: fnC.Score})
-		}
-	}
-	json.NewEncoder(os.Stdout).Encode(entries)
+type allMetrics struct {
+	Cyclomatic *cyclomatic.CyclomaticComplexity `json:",omitempty"`
+	LOC        *loc.LinesOfCode                 `json:",omitempty"`
+	GoRoutines *goroutines.GoRoutines           `json:",omitempty"`
 }
 
 func main() {
 	tests := false
 	jsonOutput := false
+	var analysisTypes StringSliceValue
+
 	flag.BoolVar(&tests, "tests", false, "Enable analyzing test files in addition to the main code")
 	flag.BoolVar(&jsonOutput, "json", false, "Output in JSON format instead of prettified output")
+	flag.Var(&analysisTypes, "types", "Types of complexity analysis to perform. If unspecified all will be executed. If specified multiple times then each one specified will be execute. Possible values are: cyclomatic, loc, go-routine")
 	flag.Parse()
 	args := flag.Args()
 
@@ -49,18 +44,33 @@ func main() {
 		os.Exit(1)
 	}
 
-	ins, _ := inspector.NewInspector(args[0], tests)
+	if len(analysisTypes) < 1 {
+		analysisTypes = StringSliceValue{"cyclomatic", "loc"}
+	}
 
-	c, err := cyclomatic.CalculateComplexity(ins)
-
+	ins, err := inspector.NewInspector(args[0], tests)
 	if err != nil {
-		fmt.Println(err)
+		fmt.Printf("Error building package inspector: %v\n", err)
 		return
 	}
 
-	if jsonOutput {
-		outputJSON(c)
-	} else {
-		outputPretty(c)
+	var m allMetrics
+	if contains(analysisTypes, "cyclomatic") {
+		c, err := cyclomatic.CalculateComplexity(ins)
+		if err != nil {
+			fmt.Printf("Error computing cyclomatic complexity: %v\n", err)
+			return
+		}
+		m.Cyclomatic = c
 	}
+
+	if contains(analysisTypes, "loc") {
+		m.LOC = loc.CalculateLinesOfCode(ins)
+	}
+
+	if contains(analysisTypes, "go-routine") {
+		m.GoRoutines = goroutines.CountGoRoutineInvocations(ins)
+	}
+
+	json.NewEncoder(os.Stdout).Encode(m)
 }

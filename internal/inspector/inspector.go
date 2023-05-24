@@ -10,9 +10,10 @@ import (
 )
 
 type Inspector struct {
-	fset     *token.FileSet
-	packages map[string]*packages.Package
-	ins      *goinspector.Inspector
+	fset           *token.FileSet
+	packages       []*packages.Package
+	filesToPackage map[string]*packages.Package
+	ins            *goinspector.Inspector
 }
 
 // NewInspector will find all .go files rooted at the
@@ -55,40 +56,39 @@ func NewInspector(path string, tests bool) (*Inspector, error) {
 	}
 
 	return &Inspector{
-		fset:     fset,
-		packages: filesToPackages,
-		ins:      goinspector.New(files),
+		fset:           fset,
+		packages:       pkgs,
+		filesToPackage: filesToPackages,
+		ins:            goinspector.New(files),
 	}, nil
 }
 
 // Walks the inspectors ast.Nodes in depth first order executing the
 // provided fn before visiting children.
-func (ins *Inspector) Preorder(types []ast.Node, fn func(n ast.Node)) {
+func (ins *Inspector) WalkAST(types []ast.Node, fn func(n ast.Node)) {
 	ins.ins.Preorder(types, fn)
+}
+
+func (ins *Inspector) WalkASTWithStack(types []ast.Node, fn func(n ast.Node, push bool, stack []ast.Node) (proceed bool)) {
+	ins.ins.WithStack(types, fn)
+}
+
+// Iterates over all Go packages in the order returned by
+// golang.org/x/tools/go/packages.Load and calls the provided function
+// with that package as an input.
+func (ins *Inspector) WalkPackages(fn func(pkg *packages.Package)) {
+	for _, pkg := range ins.packages {
+		fn(pkg)
+	}
 }
 
 func (ins *Inspector) PackageName(pos token.Pos) string {
 	f := ins.fset.File(pos)
-	pkg := ins.packages[f.Name()]
+	pkg := ins.filesToPackage[f.Name()]
 	return pkg.PkgPath
 }
 
-func (ins *Inspector) FuncName(fn *ast.FuncDecl) string {
-	if fn.Recv == nil {
-		return fn.Name.String()
-	}
-
-	receiver := ""
-	switch v := fn.Recv.List[0].Type.(type) {
-	case *ast.StarExpr:
-		ident, ok := v.X.(*ast.Ident)
-		if ok {
-			// TODO - is it important to keep around
-			receiver = ident.Name
-		}
-	case *ast.Ident:
-		receiver = v.Name
-	}
-
-	return fmt.Sprintf("%s.%s", receiver, fn.Name.String())
+func (ins *Inspector) FileName(pos token.Pos) string {
+	f := ins.fset.File(pos)
+	return f.Name()
 }

@@ -1,5 +1,12 @@
 package cyclomatic
 
+import (
+	"bytes"
+	"encoding/json"
+)
+
+
+
 type CyclomaticComplexity struct {
 	Packages map[string]*PackageCyclomaticComplexity
 }
@@ -20,9 +27,26 @@ func (c *CyclomaticComplexity) recordComplexity(pkgName, fnName string, score in
 	pkg.recordComplexity(fnName, score)
 }
 
+func (c *CyclomaticComplexity) MarshalJSON() ([]byte, error) {
+	type jsonFormatEntry struct {
+		Package  string
+		Function string
+		Score    int
+	}
+
+	var entries []*jsonFormatEntry
+	for pkg, pkgC := range c.Packages {
+		for fnName, fnC := range pkgC.Functions {
+			entries = append(entries, &jsonFormatEntry{Package: pkg, Function: fnName, Score: fnC.Score})
+		}
+	}
+	var buf bytes.Buffer
+	err := json.NewEncoder(&buf).Encode(entries)
+	return buf.Bytes(), err
+}
+
 type PackageCyclomaticComplexity struct {
 	Functions map[string]*FunctionCyclomaticComplexity
-	Score     int
 }
 
 func newPackageCyclomaticComplexity() *PackageCyclomaticComplexity {
